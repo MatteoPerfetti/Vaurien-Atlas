@@ -8,7 +8,16 @@ version = "0.1.0"
 description = "A personal research and learning application"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = ["pypdf>=5,<7"]
+
+[project.optional-dependencies]
+analyst = ["openai>=1,<3"]
+
+[project.scripts]
+vaurien-atlas = "vaurien_atlas.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+vaurien_atlas = ["instructions/*.txt"]
