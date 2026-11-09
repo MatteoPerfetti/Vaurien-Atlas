@@ -28,7 +28,11 @@ python -m venv .venv
 .\.venv\Scripts\python -c "import vaurien_atlas; print(vaurien_atlas.__file__)"
 ```
 
-The editable installation links the package to the source directory so edits are visible without reinstalling. Installing the build backend may require an internet connection. There are no runtime dependencies or runnable workflows yet. See [CHECKLIST.md](CHECKLIST.md) for progress and the next proposed task.
+The editable installation links the package to the source directory so edits are visible without reinstalling. Installing the build backend may require an internet connection. There are no runtime dependencies or runnable workflows yet. Run the record checks with `.\.venv\Scripts\python -m unittest discover -s tests -v`. See [CHECKLIST.md](CHECKLIST.md) for progress and the next proposed task.
+
+### First paper record
+
+`vaurien_atlas.paper.Paper` assigns a UUID when created and keeps it when a record is copied with changed metadata or paths. Reading status is explicit, while analysis scope defaults to `not_analyzed`; neither implies mastery. Title, DOI, arXiv ID and source paths can be absent. Paths are references only and identifiers are not checked against external sources. This in-memory record does not yet persist data, detect duplicate papers, or verify extraction coverage.
 
 ### Example settings
 

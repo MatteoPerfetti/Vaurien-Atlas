@@ -7,6 +7,7 @@
 - Added project-specific ignore rules. Verify with the `git check-ignore` examples below and inspect `git status --short`.
 - Added an installable, empty Python package and documented virtual-environment setup. An offline editable-install smoke check used the locally available build backend; Python 3.14.6 imported the package successfully.
 - Added placeholder settings for future local paths; the application does not yet read or validate them.
+- Added an in-memory validated paper record with UUID identity, independent reading status and analysis scope. Run `python -m unittest discover -s tests -v` in the installed environment to verify its core behavior.
 
 ## Decisions
 
@@ -17,7 +18,7 @@
 
 ## Next proposed task
 
-- Define the first validated paper record and its identity before adding persistence. No application workflow is implemented yet.
+- Define topic and evidenced relationship records before implementing SQLite persistence. No ingestion workflow is implemented yet.
 
 ## Reproduce the privacy check
 
