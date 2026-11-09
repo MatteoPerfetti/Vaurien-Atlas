@@ -1,0 +1,9 @@
+# Example only: the application does not read this file yet.
+# Copy to settings.local.toml when configuration support is implemented.
+# Replace placeholders with paths on your computer; keep originals outside the repo.
+[paths]
+read_papers = "path/to/read-papers"
+queued_papers = "path/to/queued-papers"
+database = "data/atlas.sqlite3"
+extracted_text = "data/extracted"
+export_vault = "path/to/isolated-test-vault"
