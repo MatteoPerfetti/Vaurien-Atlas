@@ -118,3 +118,6 @@ Use `rejected` to reject a proposal. A topic must be accepted before a relations
 ## Personal data
 
 The repository is public. Keep PDFs, CVs, private notes, credentials, databases, extracted text and logs outside version control. The ignore rules provide a safeguard, not a guarantee: inspect `git status` and staged changes before committing. Original papers and the existing vault remain in their current locations.
+
+## test to run on VS Code per the mapper
+python -m vaurien_atlas.cli map-topics --db data\vaurien-first-test.sqlite3 --run a629276a-4061-4a63-a08b-058899b2771c --extractor-version pypdf:6.21.4:v2 --allow-partial
