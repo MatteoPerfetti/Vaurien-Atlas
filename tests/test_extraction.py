@@ -110,8 +110,48 @@ class ExtractionTests(unittest.TestCase):
         out = io.StringIO()
         with self.fake([Page("Some extracted text")]), patch.dict("sys.modules", {"openai": sdk}), contextlib.redirect_stdout(out):
             self.assertEqual(main(["import-pdf", str(self.path), "--db", db, "--status", "queued"]), 0)
-            args = ["analyze-pdf", str(self.path), "--db", db, "--model", "test"]
+            args = ["analyze-pdf", str(self.path), "--db", db, "--model", "test", "--provider", "openai-api"]
             self.assertEqual(main(args), 0)
             self.assertEqual(main(args), 0)
         self.assertEqual(len(calls), 1)
         self.assertIn("cached", out.getvalue())
+
+    def test_cli_plan_path_uses_plan_login_and_cache(self):
+        import json
+        from vaurien_atlas.analyst import SECTIONS
+        db = str(Path(self.directory.name) / "plan.sqlite3")
+        data = {name: [] for name in SECTIONS}
+        data.update(unknowns=["Unknown"], extraction_limitations=["Figures absent"])
+        response = types.SimpleNamespace(status="completed", output_text=json.dumps(data), usage=None)
+        client = types.SimpleNamespace(responses=types.SimpleNamespace(create=lambda **kwargs: response))
+        out = io.StringIO()
+        with self.fake([Page("Some extracted text")]), \
+             patch("vaurien_atlas.chatgpt_plan.sign_in", return_value=client) as login, \
+             contextlib.redirect_stdout(out):
+            self.assertEqual(main(["import-pdf", str(self.path), "--db", db, "--status", "queued"]), 0)
+            args = ["analyze-pdf", str(self.path), "--db", db, "--model", "test", "--provider", "chatgpt-plan"]
+            self.assertEqual(main(args), 0)
+            self.assertEqual(main(args), 0)
+        login.assert_called_once_with("test")
+        self.assertIn('"provider": "chatgpt-plan"', out.getvalue())
+        self.assertIn("cached", out.getvalue())
+
+    def test_cli_marks_unverified_quote_as_partial(self):
+        import json
+        from vaurien_atlas.analyst import SECTIONS
+        db = str(Path(self.directory.name) / "invalid.sqlite3")
+        data = {name: [] for name in SECTIONS}
+        data.update(unknowns=[], extraction_limitations=[])
+        data["findings"] = [{"text": "Claim", "origin": "paper_claim",
+                             "evidence": [{"page": 1, "quote": "not present"}]}]
+        response = types.SimpleNamespace(status="completed", output_text=json.dumps(data), usage=None)
+        client = types.SimpleNamespace(responses=types.SimpleNamespace(create=lambda **kwargs: response))
+        output = io.StringIO()
+        with self.fake([Page("Private source text")]), \
+             patch("vaurien_atlas.chatgpt_plan.sign_in", return_value=client), \
+             contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(main(["import-pdf", str(self.path), "--db", db, "--status", "queued"]), 0)
+            self.assertEqual(main(["analyze-pdf", str(self.path), "--db", db, "--model", "test",
+                                   "--provider", "chatgpt-plan"]), 0)
+        self.assertIn("Partial analysis", output.getvalue())
+        self.assertIn('"unverified_claims"', output.getvalue())

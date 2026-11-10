@@ -7,13 +7,14 @@ from datetime import datetime, timezone
 from importlib.resources import files
 from uuid import UUID, uuid4
 
-from vaurien_atlas.analyst import ANALYSIS_SCHEMA, INSTRUCTION_VERSION, analyze_paper, validate_analysis
+from vaurien_atlas.analyst import ANALYSIS_POLICY_VERSION, ANALYSIS_SCHEMA, INSTRUCTION_VERSION, REPAIR_SCHEMA, REPAIR_VERSION, analyze_paper, validate_analysis
 from vaurien_atlas.storage import _require_foreign_keys
 
 
 def run_analysis(connection, client_factory, *, paper_id: UUID, fingerprint: str, pages: tuple[str, ...],
                  extractor_version: str, model: str, scope: str, extraction_limitations: list[str],
-                 max_input_chars: int = 200_000, max_output_tokens: int = 4000):
+                 max_input_chars: int = 200_000, max_output_tokens: int = 4000, provider: str = "openai-api",
+                 retry_partial: bool = False):
     """Return (run_id, result, cached); client_factory is only called on cache miss."""
     _require_foreign_keys(connection)
     if connection.in_transaction:
@@ -29,19 +30,25 @@ def run_analysis(connection, client_factory, *, paper_id: UUID, fingerprint: str
     if not extraction or tuple(json.loads(extraction[0])) != pages:
         raise ValueError("pages do not match the stored extraction")
     # Hash every input that can affect the analysis to prevent stale cache hits.
-    instructions = files("vaurien_atlas").joinpath("instructions/paper_analyst_v1.txt").read_text(encoding="utf-8")
-    inputs = {"paper_id": str(paper_id), "fingerprint": fingerprint, "pages": pages,
+    instructions = files("vaurien_atlas").joinpath(f"instructions/{INSTRUCTION_VERSION}.txt").read_text(encoding="utf-8")
+    repair_instructions = files("vaurien_atlas").joinpath(f"instructions/{REPAIR_VERSION}.txt").read_text(encoding="utf-8")
+    if provider not in ("openai-api", "chatgpt-plan"):
+        raise ValueError("unknown analysis provider")
+    inputs = {"provider": provider, "paper_id": str(paper_id), "fingerprint": fingerprint, "pages": pages,
               "extractor_version": extractor_version, "model": model, "scope": scope,
               "limitations": extraction_limitations, "instruction_version": INSTRUCTION_VERSION,
               "instructions": instructions, "schema": ANALYSIS_SCHEMA,
+              "repair_version": REPAIR_VERSION, "repair_instructions": repair_instructions, "repair_schema": REPAIR_SCHEMA,
+              "analysis_policy_version": ANALYSIS_POLICY_VERSION,
               "max_input_chars": max_input_chars, "max_output_tokens": max_output_tokens}
     key = hashlib.sha256(json.dumps(inputs, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
     row = connection.execute("SELECT id, result_json FROM analysis_runs WHERE cache_key=? AND status='completed' ORDER BY rowid DESC LIMIT 1", (key,)).fetchone()
     if row:
         # Revalidate cached quotations against the supplied source pages.
         result = json.loads(row[1])
-        validate_analysis(result["analysis"], pages)
-        return UUID(row[0]), result, True
+        result["analysis"] = validate_analysis(result["analysis"], pages)
+        if not (retry_partial and result.get("analysis_status") == "partial"):
+            return UUID(row[0]), result, True
     # Persist the running state before making a potentially long model call.
     run_id = uuid4()
     started = datetime.now(timezone.utc).isoformat()
@@ -53,6 +60,8 @@ def run_analysis(connection, client_factory, *, paper_id: UUID, fingerprint: str
         result = analyze_paper(client_factory(), model=model, pages=pages, scope=scope,
                                extraction_limitations=extraction_limitations, max_input_chars=max_input_chars,
                                max_output_tokens=max_output_tokens)
+        result["provider"] = provider
+        result["extractor_version"] = extractor_version
         encoded = json.dumps(result, ensure_ascii=False)
     except Exception as exc:
         # Record only the error type, avoiding sensitive exception details in SQLite.

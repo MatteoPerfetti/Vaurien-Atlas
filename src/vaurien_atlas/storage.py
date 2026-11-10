@@ -19,15 +19,15 @@ def open_database(path: str | Path) -> sqlite3.Connection:
 
 
 def initialize_database(connection: sqlite3.Connection) -> None:
-    """Create schema version 5 or upgrade an earlier supported database.
+    """Create schema version 6 or upgrade an earlier supported database.
 
     This commits schema initialization or migration.
     """
     # Refuse unknown schemas rather than guessing how to migrate their data.
     version = connection.execute("PRAGMA user_version").fetchone()[0]
-    if version == 5:
+    if version == 6:
         return
-    if version not in (0, 1, 2, 3, 4):
+    if version not in (0, 1, 2, 3, 4, 5):
         raise ValueError(f"unsupported database schema version: {version}")
     if version == 0 and connection.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' LIMIT 1").fetchone():
         raise ValueError("cannot initialize a nonempty unversioned database")
@@ -62,7 +62,8 @@ def initialize_database(connection: sqlite3.Connection) -> None:
             extractor_version TEXT NOT NULL, pages_json TEXT NOT NULL,
             PRIMARY KEY (sha256, extractor_version)
         )""")
-        connection.execute("""CREATE TABLE analysis_runs (
+        if version < 5:
+            connection.execute("""CREATE TABLE analysis_runs (
             id TEXT PRIMARY KEY, paper_id TEXT NOT NULL REFERENCES papers(id),
             fingerprint TEXT NOT NULL REFERENCES file_fingerprints(sha256),
             cache_key TEXT NOT NULL, model TEXT NOT NULL, instruction_version TEXT NOT NULL,
@@ -70,8 +71,11 @@ def initialize_database(connection: sqlite3.Connection) -> None:
             started_at TEXT NOT NULL, finished_at TEXT, duration_seconds REAL,
             result_json TEXT, failure_type TEXT
         )""")
-        connection.execute("CREATE INDEX analysis_cache_idx ON analysis_runs(cache_key, status)")
-        connection.execute("PRAGMA user_version = 5")
+            connection.execute("CREATE INDEX analysis_cache_idx ON analysis_runs(cache_key, status)")
+        # Existing topics have never had an explicit review state; do not assume acceptance.
+        connection.execute("""ALTER TABLE topics ADD COLUMN review_status TEXT NOT NULL
+                           DEFAULT 'proposed' CHECK (review_status IN ('proposed', 'accepted', 'rejected'))""")
+        connection.execute("PRAGMA user_version = 6")
 
 
 def _create_knowledge_schema(connection: sqlite3.Connection) -> None:
@@ -151,9 +155,10 @@ def save_topic(connection: sqlite3.Connection, topic: Topic) -> None:
     if not isinstance(topic, Topic):
         raise ValueError("topic must be a Topic")
     with connection:
-        connection.execute("""INSERT INTO topics (id, name, definition) VALUES (?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET name=excluded.name, definition=excluded.definition""",
-            (str(topic.id), topic.name, topic.definition))
+        connection.execute("""INSERT INTO topics (id, name, definition, review_status) VALUES (?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET name=excluded.name, definition=excluded.definition,
+            review_status=excluded.review_status""",
+            (str(topic.id), topic.name, topic.definition, topic.review_status.value))
         connection.execute("DELETE FROM topic_aliases WHERE topic_id = ?", (str(topic.id),))
         connection.executemany("INSERT INTO topic_aliases VALUES (?, ?, ?)",
                                ((str(topic.id), i, alias) for i, alias in enumerate(topic.aliases)))
@@ -163,12 +168,33 @@ def get_topic(connection: sqlite3.Connection, topic_id: UUID) -> Topic | None:
     """Reconstruct a topic and its ordered aliases, or return None."""
     if not isinstance(topic_id, UUID):
         raise ValueError("topic_id must be a UUID")
-    row = connection.execute("SELECT name, definition FROM topics WHERE id = ?", (str(topic_id),)).fetchone()
+    row = connection.execute("SELECT name, definition, review_status FROM topics WHERE id = ?", (str(topic_id),)).fetchone()
     if row is None:
         return None
     aliases = connection.execute("SELECT alias FROM topic_aliases WHERE topic_id = ? ORDER BY position",
                                  (str(topic_id),)).fetchall()
-    return Topic(id=topic_id, name=row[0], definition=row[1], aliases=tuple(a[0] for a in aliases))
+    return Topic(id=topic_id, name=row[0], definition=row[1], aliases=tuple(a[0] for a in aliases),
+                 review_status=ReviewStatus(row[2]))
+
+
+def search_topics(connection: sqlite3.Connection, query: str, limit: int = 10) -> tuple[Topic, ...]:
+    """Find up to 50 accepted topics by literal name or alias substring.
+
+    SQLite LIKE matches ASCII case-insensitively; non-ASCII case is exact.
+    Results are candidates only and do not imply a conceptual relationship.
+    """
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError("query must be nonblank")
+    if type(limit) is not int or not 1 <= limit <= 50:
+        raise ValueError("limit must be between 1 and 50")
+    # Escape SQL wildcards so user input is treated as literal text.
+    term = query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    pattern = f"%{term}%"
+    rows = connection.execute("""SELECT id FROM topics t WHERE review_status='accepted' AND
+        (name LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM topic_aliases a
+        WHERE a.topic_id=t.id AND a.alias LIKE ? ESCAPE '\\'))
+        ORDER BY name COLLATE NOCASE, id LIMIT ?""", (pattern, pattern, limit)).fetchall()
+    return tuple(get_topic(connection, UUID(row[0])) for row in rows)
 
 
 def save_relationship(connection: sqlite3.Connection, relationship: Relationship) -> None:

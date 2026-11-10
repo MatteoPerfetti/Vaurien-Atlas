@@ -63,10 +63,32 @@ class AnalysisWorkflowTests(unittest.TestCase):
         _, _, cached = run_analysis(self.conn, self.factory, **self.kwargs)
         self.assertFalse(cached)
 
+    def test_cache_is_separate_for_each_provider(self):
+        # The same model name must not merge plan and API provenance.
+        _, _, cached = run_analysis(self.conn, self.factory, **self.kwargs)
+        self.assertFalse(cached)
+        _, result, cached = run_analysis(self.conn, self.factory, **self.kwargs, provider="chatgpt-plan")
+        self.assertFalse(cached)
+        self.assertEqual(result["provider"], "chatgpt-plan")
+        self.assertEqual(self.calls, 2)
+
     def test_rejects_mismatched_extracted_pages(self):
         with self.assertRaises(ValueError):
             run_analysis(self.conn, self.factory, **(self.kwargs | {"pages": ("other",)}))
         self.assertEqual(self.calls, 0)
+
+    def test_partial_is_cached_and_can_be_explicitly_retried(self):
+        self.data["findings"][0]["evidence"][0]["quote"] = "not found"
+        _, result, cached = run_analysis(self.conn, self.factory, **self.kwargs)
+        self.assertFalse(cached)
+        self.assertEqual(result["analysis_status"], "partial")
+        self.assertEqual(self.calls, 2)
+        _, _, cached = run_analysis(self.conn, self.factory, **self.kwargs)
+        self.assertTrue(cached)
+        self.assertEqual(self.calls, 2)
+        _, _, cached = run_analysis(self.conn, self.factory, **self.kwargs, retry_partial=True)
+        self.assertFalse(cached)
+        self.assertEqual(self.calls, 4)
 
 
 if __name__ == "__main__":

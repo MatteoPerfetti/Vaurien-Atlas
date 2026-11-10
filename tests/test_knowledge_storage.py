@@ -75,7 +75,7 @@ class KnowledgeStorageTests(unittest.TestCase):
         paper = Paper(reading_status=ReadingStatus.QUEUED, source_files=("a.pdf",))
         save_paper(conn, paper)
         initialize_database(conn)
-        self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 5)
+        self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 6)
         self.assertEqual(get_paper(conn, paper.id), paper)
         save_topic(conn, Topic("Example", "Definition"))
 

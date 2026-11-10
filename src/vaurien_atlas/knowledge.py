@@ -11,6 +11,13 @@ def _required_text(name: str, value: str) -> None:
         raise ValueError(f"{name} must be nonblank text")
 
 
+class ReviewStatus(str, Enum):
+    """Whether a topic or relationship has been reviewed."""
+    PROPOSED = "proposed"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+
+
 @dataclass(frozen=True)
 class Topic:
     """A named concept with alternate names and an independent stable ID."""
@@ -18,10 +25,13 @@ class Topic:
     definition: str
     aliases: tuple[str, ...] = ()
     id: UUID = field(default_factory=uuid4)
+    review_status: ReviewStatus = ReviewStatus.PROPOSED
 
     def __post_init__(self) -> None:
         if not isinstance(self.id, UUID):
             raise ValueError("id must be a UUID")
+        if not isinstance(self.review_status, ReviewStatus):
+            raise ValueError("review_status must be a ReviewStatus")
         _required_text("name", self.name)
         _required_text("definition", self.definition)
         if not isinstance(self.aliases, tuple):
@@ -45,13 +55,6 @@ class RelationType(str, Enum):
     COVERS = "covers"  # paper -> topic
     PREREQUISITE = "prerequisite"  # prerequisite topic -> dependent topic
     RELATED = "related"  # topic -> topic
-
-
-class ReviewStatus(str, Enum):
-    """Whether a proposed relationship has been reviewed."""
-    PROPOSED = "proposed"
-    ACCEPTED = "accepted"
-    REJECTED = "rejected"
 
 
 @dataclass(frozen=True)
