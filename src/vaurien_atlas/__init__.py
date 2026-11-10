@@ -1,1 +1,1 @@
-"""Vaurien Atlas package; workflows will be added in later tasks."""
+"""Local research-library package; import its modules to use each workflow."""

@@ -1,3 +1,5 @@
+"""Check paper identity, optional metadata and field validation."""
+
 import unittest
 from dataclasses import replace
 from uuid import uuid4
@@ -21,6 +23,7 @@ class PaperTests(unittest.TestCase):
         self.assertEqual(replace(updated, id=uuid4()).source_files, ("new.pdf",))
 
     def test_rejects_invalid_fields(self):
+        # Try each invalid field independently against otherwise valid defaults.
         for values in (
             {"id": "not-a-uuid"}, {"reading_status": "read"},
             {"analysis_scope": "full_text"}, {"title": "  "},

@@ -1,3 +1,5 @@
+"""Check persisted analysis runs, cache reuse and failed-call handling."""
+
 import json
 import unittest
 from dataclasses import replace
@@ -11,6 +13,7 @@ from vaurien_atlas.storage import initialize_database, open_database, save_paper
 
 class AnalysisWorkflowTests(unittest.TestCase):
     def setUp(self):
+        # Use an isolated in-memory database and a synthetic source extraction.
         self.conn = open_database(":memory:")
         self.addCleanup(self.conn.close)
         initialize_database(self.conn)
@@ -31,6 +34,7 @@ class AnalysisWorkflowTests(unittest.TestCase):
         self.calls = 0
 
     def factory(self):
+        """Return a fake model client and count calls for cache assertions."""
         def create(**kwargs):
             self.calls += 1
             return SimpleNamespace(status="completed", output_text=json.dumps(self.data), usage=None)
@@ -49,6 +53,7 @@ class AnalysisWorkflowTests(unittest.TestCase):
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM analysis_runs WHERE status='completed'").fetchone()[0], 3)
 
     def test_failure_recorded_and_never_reused(self):
+        # Error messages may contain sensitive details, so only the type is saved.
         def broken():
             raise RuntimeError("sensitive details")
         with self.assertRaises(RuntimeError):

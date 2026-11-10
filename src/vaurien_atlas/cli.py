@@ -16,6 +16,8 @@ from vaurien_atlas.storage import initialize_database, open_database
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Parse a manual import or analysis command and report its result."""
+    # Define arguments for each operation; neither command watches folders.
     parser = argparse.ArgumentParser(prog="vaurien-atlas")
     sub = parser.add_subparsers(dest="command", required=True)
     command = sub.add_parser("import-pdf", help="register and extract one PDF")
@@ -31,6 +33,7 @@ def main(argv: list[str] | None = None) -> int:
         with closing(open_database(args.db)) as connection:
             initialize_database(connection)
             if args.command == "analyze-pdf":
+                # Only analyze a path that was already registered in this database.
                 from vaurien_atlas.analysis_workflow import run_analysis
                 path = os.path.normcase(str(Path(args.pdf).resolve(strict=True)))
                 row = connection.execute("""SELECT i.sha256, f.paper_id FROM imported_paths i
@@ -42,9 +45,11 @@ def main(argv: list[str] | None = None) -> int:
                 except ExtractionError as exc:
                     print(f"Extraction failed: {exc}", file=sys.stderr)
                     return 2
+                # The model must be told what text-only extraction can miss.
                 limitations = ["Text-only extraction: formulas, figures and layout may be missing or inaccurate."]
                 if extraction.empty_pages:
                     limitations.append("No extracted text on pages: " + ", ".join(map(str, extraction.empty_pages)))
+                # Construct the external API client only if a cache miss requires it.
                 def client_factory():
                     try:
                         from openai import OpenAI
@@ -61,6 +66,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Run: {run_id} ({'cached' if cached else 'new'})")
                 print(json.dumps(result, ensure_ascii=False, indent=2))
                 return 0
+            # Import first; if extraction fails, the paper registration remains.
             result = import_pdf(connection, args.pdf, ReadingStatus(args.status))
             print(f"Paper: {result.paper_id} ({'duplicate' if result.is_duplicate else 'new'})")
             print(f"SHA-256: {result.sha256}")
@@ -82,4 +88,5 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # Convert the returned status to a shell exit code when run as a module.
     raise SystemExit(main())

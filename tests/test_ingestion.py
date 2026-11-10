@@ -1,3 +1,5 @@
+"""Check exact-file identity using synthetic files and temporary databases."""
+
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +14,7 @@ class ImportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             first = Path(directory) / "first.pdf"
             second = Path(directory) / "second.pdf"
+            # These bytes test file identity and the header check, not PDF parsing.
             first.write_bytes(b"%PDF-1.4\nexample")
             second.write_bytes(first.read_bytes())
             conn = open_database(Path(directory) / "test.sqlite3")
@@ -25,6 +28,7 @@ class ImportTests(unittest.TestCase):
                 paper = get_paper(conn, result.paper_id)
                 self.assertEqual(paper.reading_status, ReadingStatus.QUEUED)
                 self.assertEqual(len(paper.source_files), 2)
+                # A changed file at a known path must not replace the old record.
                 first.write_bytes(b"%PDF-1.4\nchanged")
                 with self.assertRaises(ValueError):
                     import_pdf(conn, first, ReadingStatus.READ)

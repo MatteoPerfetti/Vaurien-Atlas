@@ -13,6 +13,7 @@ from vaurien_atlas.storage import _require_foreign_keys
 
 @dataclass(frozen=True)
 class ImportResult:
+    """Return the identity and duplicate status of a registered file."""
     paper_id: UUID
     sha256: str
     is_duplicate: bool
@@ -30,9 +31,11 @@ def import_pdf(connection: sqlite3.Connection, path: str | Path, status: Reading
         raise ValueError("import requires a connection without pending changes")
     if not isinstance(status, ReadingStatus):
         raise ValueError("status must be a ReadingStatus")
+    # Resolve the path before registering it; the original file is never changed.
     resolved = Path(path).resolve(strict=True)
     if resolved.suffix.lower() != ".pdf" or not resolved.is_file():
         raise ValueError("path must refer to a PDF file")
+    # Hash file bytes in chunks so identical content shares one fingerprint.
     digest = hashlib.sha256()
     with resolved.open("rb") as stream:
         before = os.fstat(stream.fileno())
@@ -42,6 +45,7 @@ def import_pdf(connection: sqlite3.Connection, path: str | Path, status: Reading
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
         after = os.fstat(stream.fileno())
+    # A file modified during hashing may be an incomplete copy; reject it.
     current = resolved.stat()
     if (before.st_size, before.st_mtime_ns, before.st_ino) != (after.st_size, after.st_mtime_ns, after.st_ino) or (
         after.st_size, after.st_mtime_ns, after.st_ino
@@ -49,6 +53,7 @@ def import_pdf(connection: sqlite3.Connection, path: str | Path, status: Reading
         raise ValueError("file changed while being read; retry after it is stable")
     fingerprint = digest.hexdigest()
     path_string = os.path.normcase(str(resolved))
+    # Keep identity and path updates in one transaction to avoid partial imports.
     with connection:
         connection.execute("BEGIN IMMEDIATE")
         existing_path = connection.execute("SELECT sha256 FROM imported_paths WHERE path = ?", (path_string,)).fetchone()
@@ -56,12 +61,14 @@ def import_pdf(connection: sqlite3.Connection, path: str | Path, status: Reading
             raise ValueError("path was previously registered with different content")
         match = connection.execute("SELECT paper_id FROM file_fingerprints WHERE sha256 = ?", (fingerprint,)).fetchone()
         paper_id = UUID(match[0]) if match else uuid4()
+        # Identical bytes reuse the existing paper and do not overwrite its status.
         if not match:
             connection.execute("INSERT INTO papers (id, reading_status, analysis_scope) VALUES (?, ?, ?)",
                                (str(paper_id), status.value, "not_analyzed"))
             connection.execute("INSERT INTO file_fingerprints VALUES (?, ?)", (fingerprint, str(paper_id)))
         if not existing_path:
             connection.execute("INSERT INTO imported_paths VALUES (?, ?)", (path_string, fingerprint))
+        # Preserve every observed path, including older paths that may now be stale.
         source_exists = connection.execute("SELECT 1 FROM paper_sources WHERE paper_id = ? AND path = ?",
                                            (str(paper_id), path_string)).fetchone()
         if not source_exists:

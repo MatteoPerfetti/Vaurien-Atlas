@@ -1,3 +1,5 @@
+"""Check topic aliases and evidence-backed relationship rules."""
+
 import unittest
 from dataclasses import replace
 from uuid import uuid4
@@ -16,6 +18,7 @@ class KnowledgeTests(unittest.TestCase):
                 Topic("Control", "Definition", aliases)
 
     def test_proposal_and_review_preserve_evidence(self):
+        # Reviewing a proposal must retain its identity and supporting evidence.
         paper = EntityRef(EntityType.PAPER, uuid4())
         topic = EntityRef(EntityType.TOPIC, uuid4())
         evidence = Evidence(paper.id, "Supporting passage", "page 2")

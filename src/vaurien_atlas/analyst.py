@@ -8,8 +8,10 @@ INSTRUCTION_VERSION = "paper_analyst_v1"
 SECTIONS = ("research_question", "contributions", "methods", "assumptions_limitations", "findings", "prerequisites")
 
 def _object(properties: dict[str, Any]) -> dict[str, Any]:
+    """Build a strict JSON Schema object with every supplied field required."""
     return {"type": "object", "properties": properties, "required": list(properties), "additionalProperties": False}
 
+# Every claim has an origin and quotations pointing to numbered source pages.
 _text = {"type": "string"}
 _evidence = _object({"page": {"type": "integer"}, "quote": _text})
 _claim = _object({"text": _text, "origin": {"type": "string", "enum": ["paper_claim", "background", "interpretation"]},
@@ -20,11 +22,16 @@ ANALYSIS_SCHEMA = _object({**{name: {"type": "array", "items": _claim} for name 
 
 
 def validate_analysis(data: Any, pages: tuple[str, ...]) -> dict[str, Any]:
+    """Reject malformed results and quotations absent from the stated page.
+
+    This verifies quotation presence, not whether it supports the claim.
+    """
     if not isinstance(data, dict) or set(data) != set(SECTIONS) | {"unknowns", "extraction_limitations"}:
         raise ValueError("invalid analysis sections")
     for name in ("unknowns", "extraction_limitations"):
         if not isinstance(data[name], list) or any(not isinstance(x, str) or not x.strip() for x in data[name]):
             raise ValueError(f"invalid {name}")
+    # Empty sections are allowed, but every returned claim must have evidence.
     for name in SECTIONS:
         if not isinstance(data[name], list):
             raise ValueError(f"invalid {name}")
@@ -52,6 +59,7 @@ def analyze_paper(client: Any, *, model: str, pages: tuple[str, ...], scope: str
     No automatic retries, truncation, persistence, or acceptance. The caller is
     responsible for consent to transmit the paper and for recording usage.
     """
+    # Bound the request without silently discarding paper content.
     if not model or not pages or any(not isinstance(p, str) for p in pages):
         raise ValueError("model and extracted pages are required")
     if scope not in ("abstract", "partial_text", "full_text"):
@@ -60,9 +68,11 @@ def analyze_paper(client: Any, *, model: str, pages: tuple[str, ...], scope: str
         raise ValueError("invalid extraction limitations")
     if max_input_chars <= 0 or max_output_tokens <= 0 or sum(len(p) for p in pages) > max_input_chars:
         raise ValueError("input exceeds limit or bounds are invalid; no text was truncated")
+    # Instructions are kept in a versioned file; paper text is untrusted input.
     instructions = files("vaurien_atlas").joinpath("instructions/paper_analyst_v1.txt").read_text(encoding="utf-8")
     payload = json.dumps({"scope": scope, "extraction_limitations": extraction_limitations,
                           "pages": [{"page": i, "text": text} for i, text in enumerate(pages, 1)]}, ensure_ascii=False)
+    # Make one structured request. The caller supplies the client and model.
     response = client.responses.create(model=model, instructions=instructions, input=payload,
         max_output_tokens=max_output_tokens, store=False,
         text={"format": {"type": "json_schema", "name": "paper_analysis", "strict": True, "schema": ANALYSIS_SCHEMA}})
@@ -72,6 +82,7 @@ def analyze_paper(client: Any, *, model: str, pages: tuple[str, ...], scope: str
         analysis = validate_analysis(json.loads(response.output_text), pages)
     except (json.JSONDecodeError, TypeError) as exc:
         raise ValueError("invalid model JSON") from exc
+    # Missing usage remains unknown rather than being estimated.
     usage = getattr(response, "usage", None)
     return {"analysis": analysis, "scope": scope, "input_extraction_limitations": list(extraction_limitations),
             "model": model, "instruction_version": INSTRUCTION_VERSION,

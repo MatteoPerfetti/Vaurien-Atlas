@@ -23,6 +23,7 @@ def initialize_database(connection: sqlite3.Connection) -> None:
 
     This commits schema initialization or migration.
     """
+    # Refuse unknown schemas rather than guessing how to migrate their data.
     version = connection.execute("PRAGMA user_version").fetchone()[0]
     if version == 5:
         return
@@ -32,8 +33,10 @@ def initialize_database(connection: sqlite3.Connection) -> None:
         raise ValueError("cannot initialize a nonempty unversioned database")
     if connection.in_transaction:
         raise ValueError("initialize with no pending transaction")
+    # Run schema creation and upgrades together, rolling back on failure.
     with connection:
         connection.execute("BEGIN")
+        # Each schema version adds tables required by a later workflow.
         if version == 0:
             connection.execute("""CREATE TABLE papers (
             id TEXT PRIMARY KEY, reading_status TEXT NOT NULL,
@@ -72,6 +75,7 @@ def initialize_database(connection: sqlite3.Connection) -> None:
 
 
 def _create_knowledge_schema(connection: sqlite3.Connection) -> None:
+        """Create topic, relation and evidence tables with reference checks."""
         connection.execute("""CREATE TABLE topics (
             id TEXT PRIMARY KEY, name TEXT NOT NULL, definition TEXT NOT NULL
         )""")
@@ -105,6 +109,7 @@ def save_paper(connection: sqlite3.Connection, paper: Paper) -> None:
     """
     if not isinstance(paper, Paper):
         raise ValueError("paper must be a Paper")
+    # Upsert the record and replace its ordered paths in the same transaction.
     with connection:
         connection.execute("""INSERT INTO papers
             (id, reading_status, title, doi, arxiv_id, analysis_scope)
@@ -135,6 +140,7 @@ def get_paper(connection: sqlite3.Connection, paper_id: UUID) -> Paper | None:
 
 
 def _require_foreign_keys(connection: sqlite3.Connection) -> None:
+    """Require reference checks before writing dependent records."""
     if not connection.execute("PRAGMA foreign_keys").fetchone()[0]:
         raise ValueError("foreign keys must be enabled; use open_database")
 
@@ -154,6 +160,7 @@ def save_topic(connection: sqlite3.Connection, topic: Topic) -> None:
 
 
 def get_topic(connection: sqlite3.Connection, topic_id: UUID) -> Topic | None:
+    """Reconstruct a topic and its ordered aliases, or return None."""
     if not isinstance(topic_id, UUID):
         raise ValueError("topic_id must be a UUID")
     row = connection.execute("SELECT name, definition FROM topics WHERE id = ?", (str(topic_id),)).fetchone()
@@ -169,6 +176,7 @@ def save_relationship(connection: sqlite3.Connection, relationship: Relationship
     _require_foreign_keys(connection)
     if not isinstance(relationship, Relationship):
         raise ValueError("relationship must be a Relationship")
+    # Separate source columns let SQLite enforce paper and topic references.
     paper_source = str(relationship.source.id) if relationship.source.kind == EntityType.PAPER else None
     topic_source = str(relationship.source.id) if relationship.source.kind == EntityType.TOPIC else None
     with connection:
@@ -180,6 +188,7 @@ def save_relationship(connection: sqlite3.Connection, relationship: Relationship
             provenance=excluded.provenance, review_status=excluded.review_status""",
             (str(relationship.id), paper_source, topic_source, str(relationship.target.id),
              relationship.relation_type.value, relationship.provenance, relationship.review_status.value))
+        # Replace evidence together with the relationship; rollback preserves both on error.
         connection.execute("DELETE FROM relationship_evidence WHERE relationship_id = ?", (str(relationship.id),))
         connection.executemany("INSERT INTO relationship_evidence VALUES (?, ?, ?, ?, ?)",
             ((str(relationship.id), i, str(e.paper_id), e.passage, e.location)
@@ -187,6 +196,7 @@ def save_relationship(connection: sqlite3.Connection, relationship: Relationship
 
 
 def get_relationship(connection: sqlite3.Connection, relationship_id: UUID) -> Relationship | None:
+    """Reconstruct a relationship and its ordered evidence, or return None."""
     if not isinstance(relationship_id, UUID):
         raise ValueError("relationship_id must be a UUID")
     row = connection.execute("""SELECT paper_source, topic_source, target, relation_type, provenance,

@@ -1,3 +1,5 @@
+"""Check topic and relationship persistence, references and schema migration."""
+
 import sqlite3
 import tempfile
 import unittest
@@ -64,6 +66,7 @@ class KnowledgeStorageTests(unittest.TestCase):
         conn.rollback()
 
     def test_upgrade_version_one_preserves_paper(self):
+        # Recreate the old paper-only schema and check migration retains its data.
         conn = open_database(":memory:")
         self.addCleanup(conn.close)
         conn.execute("CREATE TABLE papers (id TEXT PRIMARY KEY, reading_status TEXT NOT NULL, title TEXT, doi TEXT, arxiv_id TEXT, analysis_scope TEXT NOT NULL)")

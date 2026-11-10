@@ -1,3 +1,5 @@
+"""Check analyst request and validation with simulated model responses."""
+
 import json
 import unittest
 from types import SimpleNamespace
@@ -6,6 +8,7 @@ from vaurien_atlas.analyst import SECTIONS, analyze_paper
 
 
 class Responses:
+    """Record requests and return a predictable response without network calls."""
     def __init__(self, payload, status="completed"):
         self.payload, self.status, self.calls = payload, status, []
 
@@ -16,6 +19,7 @@ class Responses:
 
 
 def valid():
+    """Build a small response with a verifiable quotation."""
     data = {name: [] for name in SECTIONS}
     data.update(unknowns=["Methods not found"], extraction_limitations=["Figures not extracted"])
     data["findings"] = [{"text": "A finding", "origin": "paper_claim",

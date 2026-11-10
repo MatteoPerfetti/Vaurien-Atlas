@@ -1,3 +1,5 @@
+"""Check extraction and CLI behavior using simulated readers and model calls."""
+
 import contextlib
 import hashlib
 import io
@@ -17,6 +19,7 @@ from vaurien_atlas.storage import initialize_database, open_database
 
 
 class Page:
+    """Simulate a PDF page returning text or raising an extraction error."""
     def __init__(self, text):
         self.text = text
 
@@ -38,6 +41,7 @@ class ExtractionTests(unittest.TestCase):
         self.registration = import_pdf(self.conn, self.path, ReadingStatus.QUEUED)
 
     def fake(self, pages, version="test"):
+        """Replace pypdf temporarily; the synthetic file is not a complete PDF."""
         reader = lambda stream: types.SimpleNamespace(is_encrypted=False, pages=pages)
         return patch.dict("sys.modules", {"pypdf": types.SimpleNamespace(__version__=version, PdfReader=reader)})
 
@@ -92,6 +96,7 @@ class ExtractionTests(unittest.TestCase):
             conn.close()
 
     def test_cli_analyze_imported_pdf_and_reuse(self):
+        # Exercise both CLI commands while keeping PDF parsing and API calls fake.
         import json
         from vaurien_atlas.analyst import SECTIONS
         db = str(Path(self.directory.name) / "analysis.sqlite3")

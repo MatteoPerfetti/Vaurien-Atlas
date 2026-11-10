@@ -17,12 +17,14 @@ class ExtractionError(Exception):
 
 @dataclass(frozen=True)
 class ExtractionResult:
+    """Page text and information needed to understand cache reuse."""
     pages: tuple[str, ...]
     extractor_version: str
     cached: bool
 
     @property
     def empty_pages(self) -> tuple[int, ...]:
+        """Return one-based page numbers where no text was extracted."""
         return tuple(i for i, text in enumerate(self.pages, 1) if not text.strip())
 
 
@@ -31,10 +33,12 @@ def extract_pdf(connection: sqlite3.Connection, path: str | Path, sha256: str) -
     _require_foreign_keys(connection)
     if connection.in_transaction:
         raise ValueError("extraction requires a connection without pending changes")
+    # Delay the optional import so other workflows can run without the PDF reader.
     try:
         import pypdf
     except ImportError as exc:
         raise ExtractionError("pypdf is not installed; install project dependencies") from exc
+    # Include both the library and our extraction rules in the cache version.
     version = f"pypdf:{pypdf.__version__}:v2"
     try:
         content = Path(path).read_bytes()
@@ -42,10 +46,12 @@ def extract_pdf(connection: sqlite3.Connection, path: str | Path, sha256: str) -
         raise ExtractionError(f"cannot read PDF: {exc}") from exc
     if hashlib.sha256(content).hexdigest() != sha256:
         raise ExtractionError("file content changed since registration; import again")
+    # Verify the bytes before using the cache, so a changed file is not mislabeled.
     cached = connection.execute("SELECT pages_json FROM extractions WHERE sha256=? AND extractor_version=?",
                                 (sha256, version)).fetchone()
     if cached:
         return ExtractionResult(tuple(json.loads(cached[0])), version, True)
+    # Treat reader warnings as possible lost content instead of caching success.
     warnings = []
     class CaptureWarnings(logging.Handler):
         def emit(self, record):
@@ -69,6 +75,7 @@ def extract_pdf(connection: sqlite3.Connection, path: str | Path, sha256: str) -
         raise ExtractionError(f"PDF extraction failed: {exc}") from exc
     finally:
         logger.removeHandler(handler)
+    # Only complete, warning-free results are written to the database.
     with connection:
         connection.execute("INSERT OR REPLACE INTO extractions VALUES (?, ?, ?)",
                            (sha256, version, json.dumps(pages, ensure_ascii=False)))

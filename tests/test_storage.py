@@ -1,3 +1,5 @@
+"""Check paper persistence, transaction rollback and schema protection."""
+
 import sqlite3
 import tempfile
 import unittest
@@ -35,6 +37,7 @@ class StorageTests(unittest.TestCase):
         initialize_database(connection)
         original = Paper(reading_status=ReadingStatus.QUEUED, source_files=("original.pdf",))
         save_paper(connection, original)
+        # Force an insert failure to check that the previous paper survives.
         connection.execute("""CREATE TRIGGER reject_path BEFORE INSERT ON paper_sources
                               WHEN NEW.path = 'bad.pdf' BEGIN SELECT RAISE(ABORT, 'rejected'); END""")
         with self.assertRaises(sqlite3.IntegrityError):
